@@ -1,3 +1,5 @@
+// -*- mode: Bluespec; -*-
+
 module basics{
 
     type BINARY = List[int]
