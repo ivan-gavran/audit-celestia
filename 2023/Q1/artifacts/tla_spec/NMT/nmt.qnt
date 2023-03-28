@@ -107,7 +107,7 @@ module nmt {
     
 
     
-    pure val MAX_POWER = 5
+    pure val MAX_POWER = 3
     pure val MAX_NAMESPACE_ID = 100
     pure val EMPTY_PROOF = {start: -1, end: -1, supporting_hashes: []}
     pure val EMPTY_TREE = {leaves: Map(), hashes: Map()}
@@ -440,12 +440,13 @@ module nmt {
         }        
     }
 
-    // step is modelled as a loop of three states: 
-    // 1) requirements, 2) generation, and 3) verification.
+    // step is modelled as a loop of four always repeating states: 
+    // 1) requirements, 2) generation,  3) verification, and 4) final state.
     // 
-    // 1) when in the "requirements" or "init" state, a random size of the tree and the namespaces corresponding to leaves,
+    // 1) when in the "requirements" or "init" state, a random size of the tree and the namespaces 
+    // corresponding to leaves,
     // are generated and one of the namespaces is chosen to generate a proof for
-    // 2) wehn in the "generation" state, a proof is generated for the generated tree and the chosen namespace
+    // 2) when in the "generation" state, a proof is generated for the generated tree and the chosen namespace
     // 3) when in the "verification" state, that proof is verified
     // 
     // The three steps happen one after another (no non-determinism involved)
@@ -496,7 +497,7 @@ module nmt {
                 // state preconditions
                 last_state_v == "verification",
                 // update state for the next step
-                last_state_v' = "requirements",
+                last_state_v' = "final",
                 namespace_v' = namespace_v,
 
                 val min_leaf_key = min(tree_v.leaves.keys())
@@ -516,14 +517,26 @@ module nmt {
                         
                 verification_success_v' = verifyInclusionProof(proof_v, tree_v.hashes.get(1), namespace_v, leaves),
                 tree_v' = tree_v,
-                proof_v' = proof_v,
-                
+                proof_v' = proof_v,                
+            },
+
+            // 4): collecting all results
+            all {
+                // state preconditions
+                last_state_v == "final",
+                //update state for the next step
+                last_state_v' = "requirements",
+                // resetting the state to initial values
+                namespace_v' = -1,
+                tree_v' = EMPTY_TREE,
+                proof_v' = EMPTY_PROOF,
+                verification_success_v' = false,
             }
         }
 
     }
 
     val verificationAlwaysCorrect = 
-        (last_state_v == "requirements") implies (verification_success_v == true)
+        (last_state_v == "final") implies (verification_success_v == true)
 
 }
