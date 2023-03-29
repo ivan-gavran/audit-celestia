@@ -74,11 +74,30 @@ module basics{
 }
 
 module nmt_helpers{
+    import basics.*
 
     type NODE_IDX = int
 
     // hashes will be of type WORD
     type WORD = List[(str, int)]
+
+    // each tree is a mapping from node indices (=integers) to the
+    // corresponding data at leaf nodes and hashes of all nodes.
+    // the root of the tree has index 1, its child 2 and 3 etc. (as captured in functions
+    // `getParentIdx`, `getLeftChildidx` and `getRightChildIdx`)
+    // 
+    type TREE = {
+        leaves: NODE_IDX -> DATA_ITEM,        
+        hashes: NODE_IDX -> NAMESPACE_HASH      
+    }
+
+    type NAMESPACE_HASH = {minNS: int, maxNS: int, hash: WORD}
+    
+    type PROOF = {start: int, end: int, supporting_hashes: List[NAMESPACE_HASH]}
+
+    type DATA = (str, int)
+
+    type DATA_ITEM  = {value: DATA, namespaceId: int}
 
 
     def getParentIdx(idx : NODE_IDX) : NODE_IDX =
@@ -119,51 +138,7 @@ module nmt_helpers{
                     else
                         acc.concat(Hash(concat([dataList[i-1]],[dataList[i]])))
                 }
-            )  
-
-    
-    }
-
-
-module nmt {    
-    import basics.*
-    import nmt_helpers.*
-    
-
-    // ASSUMPTION: each tree is full and complete (2^n leaves at the bottom level)
-    
-
-    
-    pure val MAX_POWER = 3
-    pure val MAX_NAMESPACE_ID = 100
-    pure val EMPTY_PROOF = {start: -1, end: -1, supporting_hashes: []}
-    pure val EMPTY_TREE = {leaves: Map(), hashes: Map()}
-
-    
-    var proof_v : PROOF
-    var tree_v : TREE    
-    var namespace_v : int
-    var verification_success_v : bool
-    var last_state_v : string
-
-
-    // each tree is a mapping from node indices (=integers) to the
-    // corresponding data at leaf nodes and hashes of all nodes.
-    // the root of the tree has index 1, its child 2 and 3 etc. (as captured in functions
-    // `getParentIdx`, `getLeftChildidx` and `getRightChildIdx`)
-    // 
-    type TREE = {
-        leaves: NODE_IDX -> DATA_ITEM,        
-        hashes: NODE_IDX -> NAMESPACE_HASH      
-    }
-
-    type NAMESPACE_HASH = {minNS: int, maxNS: int, hash: WORD}
-    
-    type PROOF = {start: int, end: int, supporting_hashes: List[NAMESPACE_HASH]}
-
-    type DATA = (str, int)
-
-    type DATA_ITEM  = {value: DATA, namespaceId: int}
+            ) 
 
     def GenerateLeavesCorrectly(power: int, namespaceBordersSet : Set[int]) : List[DATA_ITEM] =
         
@@ -248,6 +223,37 @@ module nmt {
         )
 
         {leaves: tree_leaves, hashes: tree_hashes}
+    
+
+ 
+
+    
+}
+
+
+
+module nmt {    
+    // ASSUMPTIONS/LIMITATIONS: 
+    // - each tree is full and complete (2^n leaves at the bottom level)
+    // - not modelling ignoring max namespace
+
+    import basics.*
+    import nmt_helpers.*
+    
+
+    
+    
+
+    
+    pure val MAX_POWER = 3
+    pure val MAX_NAMESPACE_ID = 100
+    pure val EMPTY_PROOF = {start: -1, end: -1, supporting_hashes: []}
+    pure val EMPTY_TREE = {leaves: Map(), hashes: Map()}
+    pure val EMPTY_LEAVES = []
+
+    
+    
+
     
 
     def CreateProofNamespace(namespaceId: int, tree: TREE): PROOF =
@@ -435,9 +441,26 @@ module nmt {
         }
     }
     
+}
 
-    
 
+module nmtProofVerification {
+
+    // this module iteratively generates a proof and then verifies it.
+    //  run by:
+    // quint run --main=nmtSimulation --max-samples=1 --max-steps=100 nmt.qnt --invariant=verificationAlwaysCorrect
+    // to run the simulation for 100 steps and check the invariant `verificationAlwaysCorrect`
+
+
+    import basics.*
+    import nmt_helpers.*
+    import nmt.*
+
+    var proof_v : PROOF
+    var tree_v : TREE    
+    var namespace_v : int
+    var verification_success_v : bool
+    var last_state_v : string
 
 
     action init = {              
@@ -450,7 +473,7 @@ module nmt {
         }        
     }
 
-    // step is modelled as a loop of four always repeating states: 
+    // step is modelled as a loop of the four always repeating states: 
     // 1) requirements, 2) generation,  3) verification, and 4) final state.
     // 
     // 1) when in the "requirements" or "init" state, a random size of the tree and the namespaces 
@@ -458,6 +481,7 @@ module nmt {
     // are generated and one of the namespaces is chosen to generate a proof for
     // 2) when in the "generation" state, a proof is generated for the generated tree and the chosen namespace
     // 3) when in the "verification" state, that proof is verified
+    // 4) final step collects all the results
     // 
     // The three steps happen one after another (no non-determinism involved)
     action step = {
@@ -543,10 +567,259 @@ module nmt {
                 verification_success_v' = false,
             }
         }
+    }
+
+    // this invariant states that after the full loop of states,
+    // verification will be successful
+    val verificationAlwaysCorrect = 
+        (last_state_v == "final") implies (verification_success_v == true)
+}
+
+
+module nmtTest {
+
+    // this module iteratively generates a proof and then non-deterministically corrupts it.
+    // run by:
+    // quint run --main=nmtTest --max-samples=1 --max-steps=100 nmt.qnt --out-itf=out.itf.json
+    // to simulate 100 steps and save output into `out.itf.json`. This output can be used to generate 
+    // test cases (eg., in `simulation_test.go`)
+
+    import basics.*
+    import nmt_helpers.*
+    import nmt.* 
+
+    var proof_v : PROOF
+    var tree_v : TREE    
+    var namespace_v : int    
+    var next_state_v : string
+    var leaves_v : List[DATA_ITEM]
+    var corrupted : bool
+    var corruption_type : string
+    var corruption_diff : {changed_start: int, changed_end: int, changed_namespace: int, changed_indices: List[int]}
+
+    action init = {              
+        all{            
+            tree_v' = EMPTY_TREE,
+            proof_v' = EMPTY_PROOF,
+            corrupted' = false,
+            next_state_v' = "init",
+            namespace_v' = -1,
+            leaves_v' = EMPTY_LEAVES,
+            corruption_type' = "",
+            corruption_diff' = 
+            {
+                changed_start: -1,
+                changed_end: -1,
+                changed_namespace: -1,
+                changed_indices: []
+            }
+
+        }        
+    }
+
+    action requirements = {
+        all{
+            // state precondition
+            ((next_state_v == "requirements") or (next_state_v == "init")),
+            // update state for the next step
+            next_state_v' = "generation",
+
+            nondet power = oneOf(3.to(MAX_POWER))  
+            //TODO: there must be a better way to generate this set
+            nondet namespaceBordersSet = 1.to(2^(power-1) - 2).powerset().filter(x => size(x) > 1).oneOf()
+            val leaves = GenerateLeavesCorrectly(power, namespaceBordersSet)
+            all{                    
+                val tree = BuildTree(leaves)
+                all{
+                    leaves_v' = leaves,
+                    tree_v' = tree,
+                    nondet namespaceId = tree.leaves.keys().fold(
+                        Set(),
+                        (acc, leaf_key) => 
+                        union(acc, Set(tree.leaves.get(leaf_key).namespaceId))                    
+                    ).oneOf()                 
+                    namespace_v' = namespaceId,
+                }
+            },
+            // unchanged variables
+            proof_v' = proof_v,                
+            corrupted' = corrupted,
+            corruption_type' = corruption_type,
+            corruption_diff' = corruption_diff
+            }
+    }
+
+    action generation = {
+        all{
+            // state preconditions
+            next_state_v == "generation",
+            // update state for the next step
+            next_state_v' = "final",
+            proof_v' = CreateProofNamespace(namespace_v, tree_v),
+            // unchanged variables
+            namespace_v' = namespace_v,
+            corrupted' = false,
+            tree_v' = tree_v,
+            leaves_v' = leaves_v,
+            corruption_type' = corruption_type,
+            corruption_diff' = corruption_diff            
+        }
+    }
+
+
+   
+
+
+
+    action final = {
+        all {
+            // state preconditions
+            next_state_v == "final",
+            //update state for the next step
+            next_state_v' = "requirements",
+            // resetting the state to initial values
+            namespace_v' = -1,
+            tree_v' = EMPTY_TREE,
+            proof_v' = EMPTY_PROOF,
+            corrupted' = false,
+            leaves_v' = EMPTY_LEAVES,
+            corruption_type' = "",
+            corruption_diff' = 
+            {
+                changed_start: -1,
+                changed_end: -1,
+                changed_namespace: -1,
+                changed_indices: []
+            }
+            }
+    }
+
+    action corruptProof = {
+        all{
+            // state preconditions
+            next_state_v == "final",
+            corrupted == false,
+
+            // corrupting the proof
+            any{
+                // corrupting the start value
+                all{
+                    proof_v.end != 1,
+                    namespace_v' = namespace_v,
+                    nondet new_start = oneOf(
+                        0.to(proof_v.end - 1).exclude(Set(proof_v.start))
+                        )
+                    all{
+                                        
+                        proof_v' = {start: new_start, end: proof_v.end, supporting_hashes: proof_v.supporting_hashes},                        
+                        corruption_type' = "start",                        
+                        corruption_diff' = corruption_diff.with("changed_start", new_start),
+                    }
+                },
+
+                // corrupting the end value
+                all{
+                    proof_v.start < proof_v.end - 1,
+                    namespace_v' = namespace_v,
+                    nondet new_end = oneOf(proof_v.start.to(proof_v.end - 1))
+                    all{
+                        proof_v' = {start: proof_v.start, end: new_end, supporting_hashes: proof_v.supporting_hashes},
+                        corruption_type' = "end",
+                        corruption_diff' = corruption_diff.with("changed_end", new_end),
+                    }
+                    
+                },
+                
+                // corrupting the supporting hashes in a controlled way
+                all{
+                    proof_v.supporting_hashes.length() > 1,
+                    namespace_v' = namespace_v,
+                    nondet new_supporting_hashes_indices = oneOf(
+                        0.to(proof_v.supporting_hashes.length()-1)
+                            .powerset()
+                            .filter(
+                                x => 
+                                and{
+                                    size(x) < proof_v.supporting_hashes.length(),
+                                    size(x) > 0
+                                }
+                        )
+                    )
+                    val new_supporting_hashes = range(0, proof_v.supporting_hashes.length())
+                        .foldl(
+                            [],
+                            (acc, i) => 
+                            if (new_supporting_hashes_indices.contains(i))
+                                acc.append(proof_v.supporting_hashes[i])
+                            else
+                                acc
+                        )          
+                    all{          
+                        proof_v' = {start: proof_v.start, end: proof_v.end, supporting_hashes: new_supporting_hashes},
+                        corruption_type' = "supporting_hashes",
+                        val new_indices = range(0, proof_v.supporting_hashes.length())
+                            .foldl(
+                                [],
+                                (acc, i) => 
+                                if (new_supporting_hashes_indices.contains(i))
+                                    acc.append(i)
+                                else
+                                    acc
+                            )
+                        corruption_diff' = corruption_diff.with("changed_indices", new_indices),
+                    }
+                    
+                },
+                
+                // corrupting the namespace value
+                all{                 
+                    proof_v' = proof_v,
+                    nondet newNamespace = 1.to(MAX_NAMESPACE_ID).exclude(Set(namespace_v)).oneOf()
+                    all{
+                        namespace_v' = newNamespace,
+                        corruption_type' = "namespace",
+                        corruption_diff' = corruption_diff.with("changed_namespace", newNamespace),
+                    }
+                }
+            },            
+            corrupted' = true,
+
+            // unchanged variables
+            next_state_v' = next_state_v,
+            tree_v' = tree_v,            
+            leaves_v' = leaves_v
+        }
+        
 
     }
 
-    val verificationAlwaysCorrect = 
-        (last_state_v == "final") implies (verification_success_v == true)
+    // step is modelled as a loop of four always repeating states: 
+    // 1) requirements, 2) generation,  3) verification, and 4) final state.
+    // 
+    // 1) when in the "requirements" or "init" state, a random size of the tree and the namespaces 
+    // corresponding to leaves,
+    // are generated and one of the namespaces is chosen to generate a proof for
+    // 2) when in the "generation" state, a proof is generated for the generated tree and the chosen namespace
+    // 3) when in the "verification" state, that proof is verified
+    // 
+    // The three steps happen one after another (no non-determinism involved)
+    action step = {
+        any{
 
+            // 1): requirements: defining the tree and the namespace to generate a proof for
+            requirements,
+
+            // 2): generation of the proof 
+            generation,
+            
+            // 2b): corrupting the proof
+            corruptProof,            
+
+            // 3): collecting all results
+            final
+            
+        }
+
+    }
+   
 }
