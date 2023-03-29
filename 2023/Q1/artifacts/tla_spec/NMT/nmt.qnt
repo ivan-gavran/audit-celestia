@@ -3,8 +3,6 @@
 module basics{
 
     type BINARY = List[int]
-    // hashes will be of type WORD
-    type WORD = List[(str, int)]
 
     def binary(n: int) : BINARY =
         if (n == 0)
@@ -61,8 +59,7 @@ module basics{
             )
     
         
-    def Hash(data: WORD) : WORD =
-        data
+    
 
     def reverse(L: List[x]) : List[x] =
         L.foldl([], (acc, i) => [i].concat(acc))
@@ -71,13 +68,41 @@ module basics{
         if (mapX.keys().contains(key))
             mapX.get(key)
         else
-            default
+            default        
 
-        def mergeWithLeftAndRight(left: WORD, middle: WORD, right: WORD) : WORD =
-            concat(concat(left, middle), right)
-            // allTogether.select(x => x != [])
 
-    
+}
+
+module nmt_helpers{
+
+    type NODE_IDX = int
+
+    // hashes will be of type WORD
+    type WORD = List[(str, int)]
+
+
+    def getParentIdx(idx : NODE_IDX) : NODE_IDX =
+        idx / 2
+
+    def getLeftChildIdx(idx : NODE_IDX) : NODE_IDX =
+        2 * idx
+
+    def getLeftUncleIdx(idx : NODE_IDX, uncle_level : int) : NODE_IDX =
+        idx/2^uncle_level - 1
+
+    def getRightUncleIdx(idx : NODE_IDX, uncle_level : int) : NODE_IDX =
+        idx/2^uncle_level + 1
+
+
+    def getRightChildIdx(idx : NODE_IDX) : NODE_IDX =
+        2 * idx + 1
+
+    def Hash(data: WORD) : WORD =
+        data
+
+    def mergeWithLeftAndRight(left: WORD, middle: WORD, right: WORD) : WORD =
+        concat(concat(left, middle), right)
+
 
     // takes a list and maps it to a new list which contains hashes 
     // of consecutive pairs of elements from the original list
@@ -96,13 +121,13 @@ module basics{
                 }
             )  
 
-
-
-}
+    
+    }
 
 
 module nmt {    
     import basics.*
+    import nmt_helpers.*
     
 
     // ASSUMPTION: each tree is full and complete (2^n leaves at the bottom level)
@@ -121,7 +146,6 @@ module nmt {
     var verification_success_v : bool
     var last_state_v : string
 
-    type NODE_IDX = int
 
     // each tree is a mapping from node indices (=integers) to the
     // corresponding data at leaf nodes and hashes of all nodes.
@@ -140,22 +164,6 @@ module nmt {
     type DATA = (str, int)
 
     type DATA_ITEM  = {value: DATA, namespaceId: int}
-
-    def getParentIdx(idx : NODE_IDX) : NODE_IDX =
-        idx / 2
-
-    def getLeftChildIdx(idx : NODE_IDX) : NODE_IDX =
-        2 * idx
-
-    def getLeftUncleIdx(idx : NODE_IDX, uncle_level : int) : NODE_IDX =
-        idx/2^uncle_level - 1
-
-    def getRightUncleIdx(idx : NODE_IDX, uncle_level : int) : NODE_IDX =
-        idx/2^uncle_level + 1
-
-
-    def getRightChildIdx(idx : NODE_IDX) : NODE_IDX =
-        2 * idx + 1
 
     def GenerateLeavesCorrectly(power: int, namespaceBordersSet : Set[int]) : List[DATA_ITEM] =
         

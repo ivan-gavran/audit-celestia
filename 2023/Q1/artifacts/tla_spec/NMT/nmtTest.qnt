@@ -3,8 +3,6 @@
 module basics{
 
     type BINARY = List[int]
-    // hashes will be of type WORD
-    type WORD = List[(str, int)]
 
     def binary(n: int) : BINARY =
         if (n == 0)
@@ -61,8 +59,7 @@ module basics{
             )
     
         
-    def Hash(data: WORD) : WORD =
-        data
+    
 
     def reverse(L: List[x]) : List[x] =
         L.foldl([], (acc, i) => [i].concat(acc))
@@ -71,13 +68,41 @@ module basics{
         if (mapX.keys().contains(key))
             mapX.get(key)
         else
-            default
+            default        
 
-        def mergeWithLeftAndRight(left: WORD, middle: WORD, right: WORD) : WORD =
-            concat(concat(left, middle), right)
-            // allTogether.select(x => x != [])
 
-    
+}
+
+module nmt_helpers{
+
+    type NODE_IDX = int
+
+    // hashes will be of type WORD
+    type WORD = List[(str, int)]
+
+
+    def getParentIdx(idx : NODE_IDX) : NODE_IDX =
+        idx / 2
+
+    def getLeftChildIdx(idx : NODE_IDX) : NODE_IDX =
+        2 * idx
+
+    def getLeftUncleIdx(idx : NODE_IDX, uncle_level : int) : NODE_IDX =
+        idx/2^uncle_level - 1
+
+    def getRightUncleIdx(idx : NODE_IDX, uncle_level : int) : NODE_IDX =
+        idx/2^uncle_level + 1
+
+
+    def getRightChildIdx(idx : NODE_IDX) : NODE_IDX =
+        2 * idx + 1
+
+    def Hash(data: WORD) : WORD =
+        data
+
+    def mergeWithLeftAndRight(left: WORD, middle: WORD, right: WORD) : WORD =
+        concat(concat(left, middle), right)
+
 
     // takes a list and maps it to a new list which contains hashes 
     // of consecutive pairs of elements from the original list
@@ -94,15 +119,12 @@ module basics{
                     else
                         acc.concat(Hash(concat([dataList[i-1]],[dataList[i]])))
                 }
-            )  
-
-
-
-}
-
+            )      
+    }
 
 module nmtTest {    
     import basics.*
+    import nmt_helpers.*
     
 
     // ASSUMPTION: each tree is full and complete (2^n leaves at the bottom level)
@@ -122,8 +144,10 @@ module nmtTest {
     var next_state_v : string
     var leaves_v : List[DATA_ITEM]
     var corrupted : bool
+    var corruption_type : string
+    var corruption_diff : {changed_start: int, changed_end: int, changed_namespace: int, changed_indices: List[int]}
 
-    type NODE_IDX = int
+    
 
     // each tree is a mapping from node indices (=integers) to the
     // corresponding data at leaf nodes and hashes of all nodes.
@@ -143,21 +167,7 @@ module nmtTest {
 
     type DATA_ITEM  = {value: DATA, namespaceId: int}
 
-    def getParentIdx(idx : NODE_IDX) : NODE_IDX =
-        idx / 2
 
-    def getLeftChildIdx(idx : NODE_IDX) : NODE_IDX =
-        2 * idx
-
-    def getLeftUncleIdx(idx : NODE_IDX, uncle_level : int) : NODE_IDX =
-        idx/2^uncle_level - 1
-
-    def getRightUncleIdx(idx : NODE_IDX, uncle_level : int) : NODE_IDX =
-        idx/2^uncle_level + 1
-
-
-    def getRightChildIdx(idx : NODE_IDX) : NODE_IDX =
-        2 * idx + 1
 
     def GenerateLeavesCorrectly(power: int, namespaceBordersSet : Set[int]) : List[DATA_ITEM] =
         
@@ -294,149 +304,13 @@ module nmtTest {
             supporting_hashes: concat(left_hashes, right_hashes)
         }
 
-
-    
-    
-    
-    def SensibleStartEnd(start: int, end: int) : bool =
-        and {
-            start >= 0,            
-            start < end
-        }
-
-        
-
-    // all leaf nodes in the proof should have the same namespace
-    def CorrectNamespaceValue(proof: PROOF, namespaceId: int, leaves: List[DATA_ITEM]) : bool =
-        val elementsWithWrongId = leaves.select(x => x.namespaceId != namespaceId)        
-        length(elementsWithWrongId) == 0
-        
-       
-    
-    def MerkleRangeHash(proof: PROOF, leaves: List[DATA_ITEM]) : WORD =
-        
-        // the number of leaves in a complete subtree that covers the last leaf
-        // in the proof
-        val fullTreeSize = getFullTreeSize(proof.end - 1)
-
-        // binary representation of the nodes to the left of proof.start.
-        // Binary representation captures well left uncles needed for the Merkle proof.
-        val binaryLeftLimitDistance = binary(proof.start)
-
-        val binaryRightLimitDistance = binary(fullTreeSize - proof.end)
-
-        // create a mapping levelOfTheTree -> hash. This enables knowing which of the supporting_hashes
-        // is used on which level of the tree (from the left side)
-        val leftMap : int -> WORD = 
-            range(0, length(binaryLeftLimitDistance)).foldl(
-                Map(),
-                (accMap, i) => 
-                    // if the bit is 1, then the left uncle from the tree level i is necessary in the Merkle proof
-                    if (binaryLeftLimitDistance[i] == 1) 
-                        accMap.put(
-                            // reversing: because the supporting nodes are given in-order, closer relatives of
-                            // the leaf node will come the last
-                            length(binaryLeftLimitDistance) - 1 - i, 
-                            // adding the first unused of the supporting hashes (hence, key equals to the size of the growing map)
-                            proof.supporting_hashes[size(accMap.keys())].hash
-                            ) 
-                    else 
-                        accMap
-                )
-
-        // similarly to leftMap, the rightMap holds the mapping of the supporting leaves from the right side of the
-        // range
-        val rightMap : int -> WORD = 
-            range(0, length(binaryRightLimitDistance)).foldl(
-                Map(),
-                (accMap, i) 
-                => 
-                if (binaryRightLimitDistance[i] == 1) 
-                    accMap.put(
-                        i, 
-                        proof.supporting_hashes[sum(binaryLeftLimitDistance) + size(accMap.keys())].hash
-                        ) 
-                else 
-                    accMap
-                )
-
-        val numLeavesUsed = sum(binaryLeftLimitDistance)+sum(binaryRightLimitDistance)
-        
-
-        // after the left and right maps are created, the remaining supporting hashes 
-        // are the ones that are not used. They are necessarily on the right side of the leaf range
-        // and can be treated as a proof path in a regular (not the range-based) Merkle tree
-        val remainingSupportNodes : List[NAMESPACE_HASH] = 
-            if (numLeavesUsed == length(proof.supporting_hashes)) 
-                [] 
-            else 
-                proof.supporting_hashes.slice(numLeavesUsed,length(proof.supporting_hashes))
-        
-        // height of the smallest tree which starts at the leaf index 0 and encompasses the whole range
-        val treeHeight : int = 
-            if (proof.end == 1) 1 else length(binary(proof.end-1)) + 1
-
-                        
-        // a list of hashes of the leaves in the [start, end) range
-        val leafHashes: WORD = 
-            leaves.foldl(
-                [],
-                (acc, leaf) => acc.concat(Hash([leaf.value]))
-                )
-        
-        val partialTreeRootHash : WORD = 
-            // Fold over the levels of the tree, starting from the leaf level.
-            // Progress to the next level by hashing pairs of hashes from the previous level.
-            // Each level is half the size of the previous one until finally a list containing a single hash is returned. 
-            range(0,treeHeight).foldl(
-                leafHashes,
-                // pairwiseHash will map a list to a new list by taking a hash of every two consecutive values
-                (acc, i) => pairwiseHash( 
-                    mergeWithLeftAndRight(
-                        getWithDefault(leftMap, i, []),
-                        acc,
-                        getWithDefault(rightMap, i, [])
-                    )
-                )
-            )          
-
-        // having computed the partialTreeRootHash, we can now treat the rest of the supporting hashes
-        // as a regular Merkle inclusion proof and starting from the `partialTreeRootHash` chain the hashes
-        // computation.
-        val calculatedRootHash : WORD = remainingSupportNodes.foldl(
-            partialTreeRootHash,
-            (acc, levelHashes) => Hash(acc.concat(levelHashes.hash))
-        )
-        
-        calculatedRootHash
-
-
-    // none of the proof nodes should have an overlap with the `namespaceId`
-    def Completeness(proof: PROOF, namespaceId: int) : bool = 
-        val allSupportingNamespaceIds = 
-            proof.supporting_hashes.foldl(
-                Set(),
-                (acc, el) => union(acc, el.minNS.to(el.maxNS))
-            )
-        
-        not(allSupportingNamespaceIds.contains(namespaceId))
-
-
-    def verifyInclusionProof(proof: PROOF, rootHash: NAMESPACE_HASH, namespaceId: int, leaves: List[DATA_ITEM]) : bool = {
-        
-        and {            
-            SensibleStartEnd(proof.start, proof.end),            
-            CorrectNamespaceValue(proof, namespaceId, leaves),            
-            Completeness(proof, namespaceId),
-            rootHash.hash == MerkleRangeHash(proof, leaves)
-        }
-    }
     
 
     
 
 
 
+    
     action init = {              
         all{            
             tree_v' = EMPTY_TREE,
@@ -444,7 +318,16 @@ module nmtTest {
             corrupted' = false,
             next_state_v' = "init",
             namespace_v' = -1,
-            leaves_v' = EMPTY_LEAVES
+            leaves_v' = EMPTY_LEAVES,
+            corruption_type' = "",
+            corruption_diff' = 
+            {
+                changed_start: -1,
+                changed_end: -1,
+                changed_namespace: -1,
+                changed_indices: []
+            }
+
         }        
     }
 
@@ -472,8 +355,11 @@ module nmtTest {
                     namespace_v' = namespaceId,
                 }
             },
+            // unchanged variables
             proof_v' = proof_v,                
-            corrupted' = corrupted
+            corrupted' = corrupted,
+            corruption_type' = corruption_type,
+            corruption_diff' = corruption_diff
             }
     }
 
@@ -484,10 +370,13 @@ module nmtTest {
             // update state for the next step
             next_state_v' = "final",
             proof_v' = CreateProofNamespace(namespace_v, tree_v),
+            // unchanged variables
             namespace_v' = namespace_v,
             corrupted' = false,
             tree_v' = tree_v,
-            leaves_v' = leaves_v              
+            leaves_v' = leaves_v,
+            corruption_type' = corruption_type,
+            corruption_diff' = corruption_diff            
         }
     }
 
@@ -507,7 +396,15 @@ module nmtTest {
             tree_v' = EMPTY_TREE,
             proof_v' = EMPTY_PROOF,
             corrupted' = false,
-            leaves_v' = EMPTY_LEAVES
+            leaves_v' = EMPTY_LEAVES,
+            corruption_type' = "",
+            corruption_diff' = 
+            {
+                changed_start: -1,
+                changed_end: -1,
+                changed_namespace: -1,
+                changed_indices: []
+            }
             }
     }
 
@@ -522,31 +419,41 @@ module nmtTest {
                 // corrupting the start value
                 all{
                     proof_v.end != 1,
+                    namespace_v' = namespace_v,
                     nondet new_start = oneOf(
                         0.to(proof_v.end - 1).exclude(Set(proof_v.start))
                         )
+                    all{
                                         
-                    proof_v' = {start: new_start, end: proof_v.end, supporting_hashes: proof_v.supporting_hashes},
-                    namespace_v' = namespace_v
+                        proof_v' = {start: new_start, end: proof_v.end, supporting_hashes: proof_v.supporting_hashes},                        
+                        corruption_type' = "start",                        
+                        corruption_diff' = corruption_diff.with("changed_start", new_start),
+                    }
                 },
 
                 // corrupting the end value
                 all{
                     proof_v.start < proof_v.end - 1,
+                    namespace_v' = namespace_v,
                     nondet new_end = oneOf(proof_v.start.to(proof_v.end - 1))
-                    proof_v' = {start: proof_v.start, end: new_end, supporting_hashes: proof_v.supporting_hashes},
-                    namespace_v' = namespace_v
+                    all{
+                        proof_v' = {start: proof_v.start, end: new_end, supporting_hashes: proof_v.supporting_hashes},
+                        corruption_type' = "end",
+                        corruption_diff' = corruption_diff.with("changed_end", new_end),
+                    }
+                    
                 },
                 
                 // corrupting the supporting hashes in a controlled way
                 all{
                     proof_v.supporting_hashes.length() > 1,
+                    namespace_v' = namespace_v,
                     nondet new_supporting_hashes_indices = oneOf(
                         0.to(proof_v.supporting_hashes.length()-1)
                             .powerset()
                             .filter(
                                 x => 
-                                or{
+                                and{
                                     size(x) < proof_v.supporting_hashes.length(),
                                     size(x) > 0
                                 }
@@ -560,16 +467,33 @@ module nmtTest {
                                 acc.append(proof_v.supporting_hashes[i])
                             else
                                 acc
-                        )                    
-                    proof_v' = {start: proof_v.start, end: proof_v.end, supporting_hashes: new_supporting_hashes},
-                    namespace_v' = namespace_v
+                        )          
+                    all{          
+                        proof_v' = {start: proof_v.start, end: proof_v.end, supporting_hashes: new_supporting_hashes},
+                        corruption_type' = "supporting_hashes",
+                        val new_indices = range(0, proof_v.supporting_hashes.length())
+                            .foldl(
+                                [],
+                                (acc, i) => 
+                                if (new_supporting_hashes_indices.contains(i))
+                                    acc.append(i)
+                                else
+                                    acc
+                            )
+                        corruption_diff' = corruption_diff.with("changed_indices", new_indices),
+                    }
+                    
                 },
                 
                 // corrupting the namespace value
                 all{                 
                     proof_v' = proof_v,
-                    nondet newNamespace = oneOf(1.to(MAX_NAMESPACE_ID))
-                    namespace_v' = newNamespace
+                    nondet newNamespace = 1.to(MAX_NAMESPACE_ID).exclude(Set(namespace_v)).oneOf()
+                    all{
+                        namespace_v' = newNamespace,
+                        corruption_type' = "namespace",
+                        corruption_diff' = corruption_diff.with("changed_namespace", newNamespace),
+                    }
                 }
             },            
             corrupted' = true,
