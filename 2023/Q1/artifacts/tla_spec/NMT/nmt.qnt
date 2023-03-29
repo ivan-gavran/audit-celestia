@@ -1,5 +1,21 @@
 // -*- mode: Bluespec; -*-
 
+// This file contains a Quint specification of the (part of the) Namespaced Merkle Tree
+// library. 
+// The specification is written in Quint (https://github.com/informalsystems/quint), a modern specification
+// language based on TLA.
+// 
+// The file is split into five modules:
+//  - basics: some basic functions and types
+//  - nmt_helpers: helper function (e.g., generation of trees, pairwise hashing etc.)
+//  - nmt: creation of NMT proof and their verification
+//  - nmtProofVerification: actions that generate proofs and verify them, thereby checking if 
+//    the logic of the spec is sound
+//  - nmtTest: actions that generate proof and non-deterministically corrupt them afterwards,
+//    whose output can be used in test generation
+//  
+//  The specification models Inclusion proofs, but does not model Absence proofs.
+
 module basics{
 
     type BINARY = List[int]
@@ -116,6 +132,8 @@ module nmt_helpers{
     def getRightChildIdx(idx : NODE_IDX) : NODE_IDX =
         2 * idx + 1
 
+    // hash is defined trivially, as the identity function.
+    // When used for testing, it should be replaced by a real hash function
     def Hash(data: WORD) : WORD =
         data
 
@@ -448,7 +466,7 @@ module nmtProofVerification {
 
     // this module iteratively generates a proof and then verifies it.
     //  run by:
-    // quint run --main=nmtSimulation --max-samples=1 --max-steps=100 nmt.qnt --invariant=verificationAlwaysCorrect
+    // quint run --main=nmtProofVerification --max-samples=1 --max-steps=100 nmt.qnt --invariant=verificationAlwaysCorrect
     // to run the simulation for 100 steps and check the invariant `verificationAlwaysCorrect`
 
 
@@ -460,7 +478,7 @@ module nmtProofVerification {
     var tree_v : TREE    
     var namespace_v : int
     var verification_success_v : bool
-    var last_state_v : string
+    var state_v : string
 
 
     action init = {              
@@ -468,7 +486,7 @@ module nmtProofVerification {
             tree_v' = EMPTY_TREE,
             proof_v' = EMPTY_PROOF,
             verification_success_v' = false,
-            last_state_v' = "init",
+            state_v' = "requirements",
             namespace_v' = -1
         }        
     }
@@ -490,9 +508,9 @@ module nmtProofVerification {
             // 1): requirements
             all{
                 // state precondition
-                ((last_state_v == "requirements") or (last_state_v == "init")),
+                state_v == "requirements",
                 // update state for the next step
-                last_state_v' = "generation",
+                state_v' = "generation",
 
                 nondet power = oneOf(3.to(MAX_POWER))  
                 //TODO: there must be a better way to generate this set
@@ -517,9 +535,9 @@ module nmtProofVerification {
             // 2): generation
             all{
                 // state preconditions
-                last_state_v == "generation",
+                state_v == "generation",
                 // update state for the next step
-                last_state_v' = "verification",
+                state_v' = "verification",
                 proof_v' = CreateProofNamespace(namespace_v, tree_v),
                 namespace_v' = namespace_v,
                 verification_success_v' = verification_success_v,
@@ -529,9 +547,9 @@ module nmtProofVerification {
             // 3): verification
             all{
                 // state preconditions
-                last_state_v == "verification",
+                state_v == "verification",
                 // update state for the next step
-                last_state_v' = "final",
+                state_v' = "final",
                 namespace_v' = namespace_v,
 
                 val min_leaf_key = min(tree_v.leaves.keys())
@@ -557,9 +575,9 @@ module nmtProofVerification {
             // 4): collecting all results
             all {
                 // state preconditions
-                last_state_v == "final",
+                state_v == "final",
                 //update state for the next step
-                last_state_v' = "requirements",
+                state_v' = "requirements",
                 // resetting the state to initial values
                 namespace_v' = -1,
                 tree_v' = EMPTY_TREE,
@@ -572,7 +590,7 @@ module nmtProofVerification {
     // this invariant states that after the full loop of states,
     // verification will be successful
     val verificationAlwaysCorrect = 
-        (last_state_v == "final") implies (verification_success_v == true)
+        (state_v == "final") implies (verification_success_v == true)
 }
 
 
@@ -591,7 +609,7 @@ module nmtTest {
     var proof_v : PROOF
     var tree_v : TREE    
     var namespace_v : int    
-    var next_state_v : string
+    var state_v : string
     var leaves_v : List[DATA_ITEM]
     var corrupted : bool
     var corruption_type : string
@@ -602,7 +620,7 @@ module nmtTest {
             tree_v' = EMPTY_TREE,
             proof_v' = EMPTY_PROOF,
             corrupted' = false,
-            next_state_v' = "init",
+            state_v' = "init",
             namespace_v' = -1,
             leaves_v' = EMPTY_LEAVES,
             corruption_type' = "",
@@ -620,9 +638,9 @@ module nmtTest {
     action requirements = {
         all{
             // state precondition
-            ((next_state_v == "requirements") or (next_state_v == "init")),
+            state_v == "requirements",
             // update state for the next step
-            next_state_v' = "generation",
+            state_v' = "generation",
 
             nondet power = oneOf(3.to(MAX_POWER))  
             //TODO: there must be a better way to generate this set
@@ -652,9 +670,9 @@ module nmtTest {
     action generation = {
         all{
             // state preconditions
-            next_state_v == "generation",
+            state_v == "generation",
             // update state for the next step
-            next_state_v' = "final",
+            state_v' = "final",
             proof_v' = CreateProofNamespace(namespace_v, tree_v),
             // unchanged variables
             namespace_v' = namespace_v,
@@ -674,9 +692,9 @@ module nmtTest {
     action final = {
         all {
             // state preconditions
-            next_state_v == "final",
+            state_v == "final",
             //update state for the next step
-            next_state_v' = "requirements",
+            state_v' = "requirements",
             // resetting the state to initial values
             namespace_v' = -1,
             tree_v' = EMPTY_TREE,
@@ -697,7 +715,7 @@ module nmtTest {
     action corruptProof = {
         all{
             // state preconditions
-            next_state_v == "final",
+            state_v == "final",
             corrupted == false,
 
             // corrupting the proof
@@ -785,7 +803,7 @@ module nmtTest {
             corrupted' = true,
 
             // unchanged variables
-            next_state_v' = next_state_v,
+            state_v' = state_v,
             tree_v' = tree_v,            
             leaves_v' = leaves_v
         }
@@ -793,14 +811,18 @@ module nmtTest {
 
     }
 
-    // step is modelled as a loop of four always repeating states: 
-    // 1) requirements, 2) generation,  3) verification, and 4) final state.
+    // step is modelled as by 4 states:
+    // 1) requirements, 2) generation,  2a) corruptProof, and 3) final state.
     // 
+    // The state `corruptProof` is marked by 2a because it may be skipped (leaving the proof uncorrupted)
     // 1) when in the "requirements" or "init" state, a random size of the tree and the namespaces 
     // corresponding to leaves,
     // are generated and one of the namespaces is chosen to generate a proof for
     // 2) when in the "generation" state, a proof is generated for the generated tree and the chosen namespace
-    // 3) when in the "verification" state, that proof is verified
+    // 2a) when in the `final` state, the proof may be corrupted by changing its start, end, nodes, or namespace
+    // and not transitioning to the next state, but remaining in `final`. (There will be no two corruptions because
+    // the variable `corrupted` is set to true after the first corruption.)
+    // 3) when in the `final` state, the state is reset to the initial values
     // 
     // The three steps happen one after another (no non-determinism involved)
     action step = {
